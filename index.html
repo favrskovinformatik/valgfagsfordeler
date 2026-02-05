@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Valgfags-fordeler</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@stlite/mountable@0.39.0/build/stlite.js"></script>
+    <script>
+      stlite.mount({
+        requirements: ["pandas", "openpyxl"],
+        entrypoint: "app.py",
+        files: {
+          "app.py": `
+import streamlit as st
+import pandas as pd
+import io
+import random
+
+st.set_page_config(page_title="Valgfagsfordeling", layout="wide")
+
+# --- FORSIDE / VEJLEDNING ---
+st.title("📖 Valgfagsfordeling")
+
+st.info("""
+### 1. Krav til Excel-filens format
+* **Kolonner:** Filen SKAL indeholde kolonnerne **Id**, **Navn**, **Vf1**, **Vf2**, **Vf3** og **Fr.sprog**.
+* **Niveauerne:** Genkendes på det sidste bogstav i fagets navn. **'A'** eller **'B'** placeres i **Bånd 1, 2 eller 3**, mens **'C'** kan placeres i **alle 4 bånd**.
+
+**Eksempel på dataformat i Excel:**
+| Id | Navn | Vf1 | Vf2 | Vf3 | Fr.sprog |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 2p 23 | Jensen, Mette | <enA> | <tyFort.A> | <inC> | |
+| 2q 08 | Petersen, Jonas | <iaB> | <psC> | | 24spA2 |
+
+*Bemærk: Valgfag står typisk i vinkelparenteser <>. Tomme celler er ok. Fremmedsprog står som tekst og holdnavnet skal være ens på tværs af klasser.*
+
+* **Fremmedsprog & Fysik A (fyA):** Disse hold **splittes aldrig**.
+
+### Særlige funktioner
+* **Klasse-optimering:** Efter alle elever er fordelt, forsøger programmet at bytte elever indbyrdes mellem parallelhold, så man kommer på hold med flest mulige fra sin egen klasse.
+* **Simulering:** Programmet kører op til 100 simuleringer for at finde den kombination, der giver 0 elever med uopfyldte ønsker.
+""")
+
+st.divider()
+
+# --- SELVE PROGRAMMET ---
+uploaded_file = st.file_uploader("Upload Excel-fil her", type=["xlsx"])
+
+def clean_tag(val):
+    if pd.isna(val) or str(val).strip() == "": return None
+    # Rens for tags og fjern whitespace
+    return str(val).replace('<', '').replace('>', '').strip()
+
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
+    oprindelige_elever = []
+    fag_behov = {}
+    
+    for _, row in df.iterrows():
+        v = [clean_tag(row.get('Vf1')), clean_tag(row.get('Vf2')), clean_tag(row.get('Vf3'))]
+        sprog = clean_tag(row.get('Fr.sprog'))
+        ønsker = [f for f in [sprog, v[0], v[1], v[2]] if f]
+        klasse = str(row['Id'])[:2].lower()
+        oprindelige_elever.append({"Id": row['Id'], "Navn": row['Navn'], "Klasse": klasse, "Ønsker": ønsker})
+        for f in ønsker:
+            fag_behov[f] = fag_behov.get(f, 0) + 1
+
+    MAX_SIZE = 30
+
+    def run_simulation():
+        hold_pool = []
+        # Sorter fag: Sprog og fyA først
+        sorted_fags = sorted(fag_behov.items(), key=lambda x: (any(s in x[0].lower() for s in ["ty","fr","sp"]) or "fya" in x[0].lower()), reverse=True)
+        
+        for fag, antal in sorted_fags:
+            f_low = fag.lower()
+            # Find sidste bogstav for at bestemme niveau
+            last_char = f_low[-1] if f_low else ""
+            
+            is_sprog_fya = any(s in f_low for s in ["ty", "fr", "sp"]) or "fya" in f_low
+            is_c = (last_char == 'c') and not is_sprog_fya
+            is_a_b = (last_char in ['a', 'b'])
+            
+            # Sprog og fyA får altid kun 1 hold
+            n_hold = 1 if is_sprog_fya else (antal // (MAX_SIZE + 1)) + 1
+            
+            for i in range(n_hold):
+                # Bestem mulige bånd baseret på sidste bogstav/type
+                if is_c:
+                    mulige = [1, 2, 3, 4]
+                else:
+                    mulige = [1, 2, 3] # A, B og Sprog/fyA
+                
+                # Start-bånd (C-fag prøver at fylde bånd 4 først)
+                start_b = 4 if (is_c and i == 0) else random.choice(mulige)
+
+                hold_pool.append({
+                    "fag": fag, 
+                    "navn": f"{fag}_H{i+1}" if n_hold > 1 else fag,
+                    "baand": start_b, 
+                    "elever": [], 
+                    "max": 1000 if is_sprog_fya else MAX_SIZE,
+                    "mulige_baand": mulige, 
+                    "is_sprog_fya": is_sprog_fya
+                })
+
+        elever = [dict(e, Tildelt=[]) for e in oprindelige_elever]
+        random.shuffle(elever)
+        # Prioriter elever med sprogønsker
+        elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
+
+        for e in elever:
+            optagede_baand = {}
+            for ønske in e["Ønsker"]:
+                placeret = False
+                relevante_hold = [h for h in hold_pool if h["fag"] == ønske]
+                relevante_hold.sort(key=lambda x: len(x["elever"]))
+                
+                # Forsøg tildeling i nuværende bånd
+                for h in relevante_hold:
+                    if h["baand"] not in optagede_baand and len(h["elever"]) < h["max"]:
+                        h["elever"].append(e)
+                        optagede_baand[h["baand"]] = h
+                        e["Tildelt"].append(ønske)
+                        placeret = True
+                        break
+                
+                # Hvis ikke muligt, prøv at flytte holdet til et andet gyldigt bånd
+                if not placeret:
+                    for h in relevante_hold:
+                        for nyt_b in h["mulige_baand"]:
+                            if nyt_b not in optagede_baand and len(h["elever"]) < h["max"]:
+                                h["baand"] = nyt_b
+                                h["elever"].append(e)
+                                optagede_baand[nyt_b] = h
+                                e["Tildelt"].append(ønske)
+                                placeret = True
+                                break
+                        if placeret: break
+        
+        mangler = sum(1 for e in elever if len(e["Tildelt"]) < len(e["Ønsker"]))
+        return mangler, hold_pool, elever
+
+    best_mangler = 999
+    best_res = None
+    with st.spinner('Kører simuleringer...'):
+        for i in range(100):
+            m, h, e = run_simulation()
+            if m < best_mangler:
+                best_mangler = m
+                best_res = (h, e)
+            if best_mangler == 0: break
+
+    final_hold, final_elever = best_res
+
+    # KLASSE-OPTIMERING (Kun for parallelhold)
+    for fag_navn in fag_behov.keys():
+        fagets_hold = [h for h in final_hold if h["fag"] == fag_navn and not h["is_sprog_fya"]]
+        if len(fagets_hold) > 1:
+            for _ in range(200):
+                h1, h2 = random.sample(fagets_hold, 2)
+                if h1["baand"] == h2["baand"]:
+                    for i, e1 in enumerate(h1["elever"]):
+                        for j, e2 in enumerate(h2["elever"]):
+                            c1 = (sum(1 for x in h1["elever"] if x["Klasse"] == e1["Klasse"]) + 
+                                  sum(1 for x in h2["elever"] if x["Klasse"] == e2["Klasse"]))
+                            c2 = (sum(1 for x in h1["elever"] if x["Klasse"] == e2["Klasse"]) + 
+                                  sum(1 for x in h2["elever"] if x["Klasse"] == e1["Klasse"]))
+                            if c2 > c1:
+                                h1["elever"][i], h2["elever"][j] = e2, e1
+
+    # --- OUTPUT ---
+    if best_mangler == 0:
+        st.success("✅ Succes! Alle ønsker er opfyldt.")
+    else:
+        st.warning(f"⚠️ Resultat: {best_mangler} ønsker kunne ikke opfyldes.")
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Ark 1: Oversigt
+        oversigt = []
+        for h in final_hold:
+            if h["elever"]:
+                oversigt.append({"Hold": h["navn"], "Bånd": h["baand"], "Antal elever": len(h["elever"])})
+        pd.DataFrame(oversigt).sort_values(["Bånd", "Hold"]).to_excel(writer, sheet_name='Oversigt_Hold', index=False)
+        
+        # Ark 2: Fejlliste
+        fejl = [{"Elev": f"{e['Navn']} ({e['Id']})", "Mangler": ", ".join(set(e['Ønsker'])-set(e['Tildelt']))} for e in final_elever if len(e['Tildelt']) < len(e['Ønsker'])]
+        pd.DataFrame(fejl).to_excel(writer, sheet_name='Uopfyldte_Ønsker', index=False)
+
+        # Ark pr. hold
+        for h in final_hold:
+            if h["elever"]:
+                navne = [f"{e['Navn']} ({e['Id']})" for e in h["elever"]]
+                pd.DataFrame({"Navn": sorted(navne)}).to_excel(writer, sheet_name=h["navn"][:31], index=False)
+
+    st.download_button("Hent færdig Excel-fil", output.getvalue(), "valgfagsfordeling.xlsx")
+`
+        }
+      });
+    </script>
+  </body>
+</html>
