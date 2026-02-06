@@ -185,9 +185,9 @@ if uploaded_file:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # 1. FANEN: Oversigt_Hold (Renset for dubletter)
         oversigt = []
         for h in final_hold:
-            # Endelig rensning af listerne for ID-dubletter
             seen_ids = set()
             clean_list = []
             for e in h["elever"]:
@@ -201,9 +201,32 @@ if uploaded_file:
         
         pd.DataFrame(oversigt).sort_values(["Bånd", "Hold"]).to_excel(writer, sheet_name='Oversigt_Hold', index=False)
         
+        # 2. FANEN: Elev_Skemaer (Den nye oversigt du bad om)
+        skema_data = []
+        for e in final_elever:
+            # Vi finder hvilke fag eleven har fået i hvert bånd
+            # Vi kigger i final_hold for at se hvor eleven er placeret
+            elev_fag = {1: "", 2: "", 3: "", 4: ""}
+            for h in final_hold:
+                if any(el["Id"] == e["Id"] for el in h["elever"]):
+                    elev_fag[h["baand"]] = h["fag"]
+            
+            skema_data.append({
+                "Id": e["Id"],
+                "Navn": e["Navn"],
+                "Bånd 1": elev_fag[1],
+                "Bånd 2": elev_fag[2],
+                "Bånd 3": elev_fag[3],
+                "Bånd 4": elev_fag[4]
+            })
+        
+        pd.DataFrame(skema_data).sort_values("Navn").to_excel(writer, sheet_name='Elev_Skemaer', index=False)
+
+        # 3. FANEN: Uopfyldte_Ønsker
         fejl = [{"Elev": f"{e['Navn']} ({e['Id']})", "Mangler": ", ".join(set(e['Ønsker'])-set(e['Tildelt']))} for e in final_elever if len(e['Tildelt']) < len(e['Ønsker'])]
         pd.DataFrame(fejl).to_excel(writer, sheet_name='Uopfyldte_Ønsker', index=False)
 
+        # 4. FANER: Individuelle Holdlister
         for h in final_hold:
             if h["elever"]:
                 navne = [f"{e['Navn']} ({e['Id']})" for e in h["elever"]]
