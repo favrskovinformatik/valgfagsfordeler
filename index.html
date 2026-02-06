@@ -18,6 +18,7 @@ import streamlit as st
 import pandas as pd
 import io
 import random
+import copy
 
 st.set_page_config(page_title="Valgfagsfordeling", layout="wide")
 
@@ -35,14 +36,8 @@ st.info("""
 | 2p 23 | Jensen, Mette | <enA> | <tyFort.A> | <inC> | |
 | 2q 08 | Petersen, Jonas | <iaB> | <psC> | | 24spA2 |
 
-*Bemærk: Valgfag står typisk i vinkelparenteser <>. Tomme celler er ok. Fremmedsprog står som tekst og holdnavnet skal være ens på tværs af klasser.*
-
 * **Fremmedsprog & Fysik A (fyA):** Disse hold **splittes aldrig**.
 * **Specialregler for ia, fi og in:** Disse hold må **aldrig** ligge i samme bånd. Dette gælder også på tværs af niveauer (f.eks. må iaB og iaC ikke ligge i samme bånd).
-
-### Særlige funktioner
-* **Klasse-optimering:** Efter alle elever er fordelt, forsøger programmet at bytte elever indbyrdes mellem parallelhold, så man kommer på hold med flest mulige fra sin egen klasse.
-* **Simulering:** Programmet kører op til 100 simuleringer for at finde den kombination, der giver 0 elever med uopfyldte ønsker.
 """)
 
 st.divider()
@@ -55,7 +50,6 @@ def clean_tag(val):
     return str(val).replace('<', '').replace('>', '').strip()
 
 def get_base_fag(fag_navn):
-    # Udtrækker de første to bogstaver for at gruppere iaB, iaC, inC osv.
     return fag_navn[:2].lower()
 
 if uploaded_file:
@@ -82,7 +76,6 @@ if uploaded_file:
             f_low = fag.lower()
             last_char = f_low[-1] if f_low else ""
             base = get_base_fag(fag)
-            
             is_sprog_fya = any(s in f_low for s in ["ty", "fr", "sp"]) or "fya" in f_low
             is_c = (last_char == 'c') and not is_sprog_fya
             
@@ -102,27 +95,30 @@ if uploaded_file:
                     "special_conflict": base in ["ia", "fi", "in"]
                 })
 
-        elever = [dict(e, Tildelt=[]) for e in oprindelige_elever]
-        random.shuffle(elever)
-        elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
+        # Brug dyb kopi for at sikre rene data i hver simulering
+        sim_elever = [copy.deepcopy(e) for e in oprindelige_elever]
+        for e in sim_elever: e["Tildelt"] = []
+        
+        random.shuffle(sim_elever)
+        sim_elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
 
-        for e in elever:
-            optagede_baand = {}
+        for e in sim_elever:
+            optagede_baand = set()
             for ønske in e["Ønsker"]:
                 placeret = False
                 relevante_hold = [h for h in hold_pool if h["fag"] == ønske]
                 relevante_hold.sort(key=lambda x: len(x["elever"]))
                 
                 for h in relevante_hold:
-                    # Tjek global bånd-konflikt for specialfag (ia, fi, in)
                     bånd_konflikt = False
                     if h["special_conflict"]:
                         if any(other["baand"] == h["baand"] and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
                             bånd_konflikt = True
                     
-                    if h["baand"] not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
+                    # SIKKERHED: Tjek om elev allerede er på holdet (e ikke i h["elever"])
+                    if h["baand"] not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"] and e not in h["elever"]:
                         h["elever"].append(e)
-                        optagede_baand[h["baand"]] = h
+                        optagede_baand.add(h["baand"])
                         e["Tildelt"].append(ønske)
                         placeret = True
                         break
@@ -135,17 +131,18 @@ if uploaded_file:
                                 if any(other["baand"] == nyt_b and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
                                     bånd_konflikt = True
                             
-                            if nyt_b not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
+                            # SIKKERHED: Samme tjek ved flytning af bånd
+                            if nyt_b not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"] and e not in h["elever"]:
                                 h["baand"] = nyt_b
                                 h["elever"].append(e)
-                                optagede_baand[nyt_b] = h
+                                optagede_baand.add(nyt_b)
                                 e["Tildelt"].append(ønske)
                                 placeret = True
                                 break
                         if placeret: break
         
-        mangler = sum(1 for e in elever if len(e["Tildelt"]) < len(e["Ønsker"]))
-        return mangler, hold_pool, elever
+        mangler = sum(1 for e in sim_elever if len(e["Tildelt"]) < len(e["Ønsker"]))
+        return mangler, hold_pool, sim_elever
 
     best_mangler = 999
     best_res = None
