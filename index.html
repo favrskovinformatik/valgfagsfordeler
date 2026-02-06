@@ -38,6 +38,7 @@ st.info("""
 *Bemærk: Valgfag står typisk i vinkelparenteser <>. Tomme celler er ok. Fremmedsprog står som tekst og holdnavnet skal være ens på tværs af klasser.*
 
 * **Fremmedsprog & Fysik A (fyA):** Disse hold **splittes aldrig**.
+* **Specialregler for ia, fi og in:** Disse hold må **aldrig** ligge i samme bånd. Dette gælder også på tværs af niveauer (f.eks. må iaB og iaC ikke ligge i samme bånd).
 
 ### Særlige funktioner
 * **Klasse-optimering:** Efter alle elever er fordelt, forsøger programmet at bytte elever indbyrdes mellem parallelhold, så man kommer på hold med flest mulige fra sin egen klasse.
@@ -51,8 +52,11 @@ uploaded_file = st.file_uploader("Upload Excel-fil her", type=["xlsx"])
 
 def clean_tag(val):
     if pd.isna(val) or str(val).strip() == "": return None
-    # Rens for tags og fjern whitespace
     return str(val).replace('<', '').replace('>', '').strip()
+
+def get_base_fag(fag_navn):
+    # Udtrækker de første to bogstaver for at gruppere iaB, iaC, inC osv.
+    return fag_navn[:2].lower()
 
 if uploaded_file:
     df = pd.read_excel(uploaded_file)
@@ -72,44 +76,34 @@ if uploaded_file:
 
     def run_simulation():
         hold_pool = []
-        # Sorter fag: Sprog og fyA først
         sorted_fags = sorted(fag_behov.items(), key=lambda x: (any(s in x[0].lower() for s in ["ty","fr","sp"]) or "fya" in x[0].lower()), reverse=True)
         
         for fag, antal in sorted_fags:
             f_low = fag.lower()
-            # Find sidste bogstav for at bestemme niveau
             last_char = f_low[-1] if f_low else ""
+            base = get_base_fag(fag)
             
             is_sprog_fya = any(s in f_low for s in ["ty", "fr", "sp"]) or "fya" in f_low
             is_c = (last_char == 'c') and not is_sprog_fya
-            is_a_b = (last_char in ['a', 'b'])
             
-            # Sprog og fyA får altid kun 1 hold
             n_hold = 1 if is_sprog_fya else (antal // (MAX_SIZE + 1)) + 1
             
             for i in range(n_hold):
-                # Bestem mulige bånd baseret på sidste bogstav/type
-                if is_c:
-                    mulige = [1, 2, 3, 4]
-                else:
-                    mulige = [1, 2, 3] # A, B og Sprog/fyA
-                
-                # Start-bånd (C-fag prøver at fylde bånd 4 først)
-                start_b = 4 if (is_c and i == 0) else random.choice(mulige)
-
+                mulige = [1, 2, 3, 4] if is_c else [1, 2, 3]
                 hold_pool.append({
                     "fag": fag, 
+                    "base": base,
                     "navn": f"{fag}_H{i+1}" if n_hold > 1 else fag,
-                    "baand": start_b, 
+                    "baand": random.choice(mulige), 
                     "elever": [], 
                     "max": 1000 if is_sprog_fya else MAX_SIZE,
                     "mulige_baand": mulige, 
-                    "is_sprog_fya": is_sprog_fya
+                    "is_sprog_fya": is_sprog_fya,
+                    "special_conflict": base in ["ia", "fi", "in"]
                 })
 
         elever = [dict(e, Tildelt=[]) for e in oprindelige_elever]
         random.shuffle(elever)
-        # Prioriter elever med sprogønsker
         elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
 
         for e in elever:
@@ -119,20 +113,29 @@ if uploaded_file:
                 relevante_hold = [h for h in hold_pool if h["fag"] == ønske]
                 relevante_hold.sort(key=lambda x: len(x["elever"]))
                 
-                # Forsøg tildeling i nuværende bånd
                 for h in relevante_hold:
-                    if h["baand"] not in optagede_baand and len(h["elever"]) < h["max"]:
+                    # Tjek global bånd-konflikt for specialfag (ia, fi, in)
+                    bånd_konflikt = False
+                    if h["special_conflict"]:
+                        if any(other["baand"] == h["baand"] and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
+                            bånd_konflikt = True
+                    
+                    if h["baand"] not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
                         h["elever"].append(e)
                         optagede_baand[h["baand"]] = h
                         e["Tildelt"].append(ønske)
                         placeret = True
                         break
                 
-                # Hvis ikke muligt, prøv at flytte holdet til et andet gyldigt bånd
                 if not placeret:
                     for h in relevante_hold:
                         for nyt_b in h["mulige_baand"]:
-                            if nyt_b not in optagede_baand and len(h["elever"]) < h["max"]:
+                            bånd_konflikt = False
+                            if h["special_conflict"]:
+                                if any(other["baand"] == nyt_b and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
+                                    bånd_konflikt = True
+                            
+                            if nyt_b not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
                                 h["baand"] = nyt_b
                                 h["elever"].append(e)
                                 optagede_baand[nyt_b] = h
@@ -156,7 +159,7 @@ if uploaded_file:
 
     final_hold, final_elever = best_res
 
-    # KLASSE-OPTIMERING (Kun for parallelhold)
+    # KLASSE-OPTIMERING
     for fag_navn in fag_behov.keys():
         fagets_hold = [h for h in final_hold if h["fag"] == fag_navn and not h["is_sprog_fya"]]
         if len(fagets_hold) > 1:
@@ -172,7 +175,6 @@ if uploaded_file:
                             if c2 > c1:
                                 h1["elever"][i], h2["elever"][j] = e2, e1
 
-    # --- OUTPUT ---
     if best_mangler == 0:
         st.success("✅ Succes! Alle ønsker er opfyldt.")
     else:
@@ -180,18 +182,15 @@ if uploaded_file:
 
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Ark 1: Oversigt
         oversigt = []
         for h in final_hold:
             if h["elever"]:
                 oversigt.append({"Hold": h["navn"], "Bånd": h["baand"], "Antal elever": len(h["elever"])})
         pd.DataFrame(oversigt).sort_values(["Bånd", "Hold"]).to_excel(writer, sheet_name='Oversigt_Hold', index=False)
         
-        # Ark 2: Fejlliste
         fejl = [{"Elev": f"{e['Navn']} ({e['Id']})", "Mangler": ", ".join(set(e['Ønsker'])-set(e['Tildelt']))} for e in final_elever if len(e['Tildelt']) < len(e['Ønsker'])]
         pd.DataFrame(fejl).to_excel(writer, sheet_name='Uopfyldte_Ønsker', index=False)
 
-        # Ark pr. hold
         for h in final_hold:
             if h["elever"]:
                 navne = [f"{e['Navn']} ({e['Id']})" for e in h["elever"]]
