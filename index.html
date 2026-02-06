@@ -36,8 +36,14 @@ st.info("""
 | 2p 23 | Jensen, Mette | <enA> | <tyFort.A> | <inC> | |
 | 2q 08 | Petersen, Jonas | <iaB> | <psC> | | 24spA2 |
 
+*Bemærk: Valgfag står typisk i vinkelparenteser <>. Tomme celler er ok. Fremmedsprog står som tekst og holdnavnet skal være ens på tværs af klasser.*
+
 * **Fremmedsprog & Fysik A (fyA):** Disse hold **splittes aldrig**.
 * **Specialregler for ia, fi og in:** Disse hold må **aldrig** ligge i samme bånd. Dette gælder også på tværs af niveauer (f.eks. må iaB og iaC ikke ligge i samme bånd).
+
+### Særlige funktioner
+* **Klasse-optimering:** Efter alle elever er fordelt, forsøger programmet at bytte elever indbyrdes mellem parallelhold, så man kommer på hold med flest mulige fra sin egen klasse.
+* **Simulering:** Programmet kører op til 100 simuleringer for at finde den kombination, der giver 0 elever med uopfyldte ønsker.
 """)
 
 st.divider()
@@ -78,32 +84,26 @@ if uploaded_file:
             base = get_base_fag(fag)
             is_sprog_fya = any(s in f_low for s in ["ty", "fr", "sp"]) or "fya" in f_low
             is_c = (last_char == 'c') and not is_sprog_fya
-            
             n_hold = 1 if is_sprog_fya else (antal // (MAX_SIZE + 1)) + 1
             
             for i in range(n_hold):
                 mulige = [1, 2, 3, 4] if is_c else [1, 2, 3]
                 hold_pool.append({
-                    "fag": fag, 
-                    "base": base,
-                    "navn": f"{fag}_H{i+1}" if n_hold > 1 else fag,
-                    "baand": random.choice(mulige), 
-                    "elever": [], 
+                    "fag": fag, "base": base, "navn": f"{fag}_H{i+1}" if n_hold > 1 else fag,
+                    "baand": random.choice(mulige), "elever": [], 
                     "max": 1000 if is_sprog_fya else MAX_SIZE,
-                    "mulige_baand": mulige, 
-                    "is_sprog_fya": is_sprog_fya,
+                    "mulige_baand": mulige, "is_sprog_fya": is_sprog_fya,
                     "special_conflict": base in ["ia", "fi", "in"]
                 })
 
-        # Brug dyb kopi for at sikre rene data i hver simulering
-        sim_elever = [copy.deepcopy(e) for e in oprindelige_elever]
-        for e in sim_elever: e["Tildelt"] = []
-        
-        random.shuffle(sim_elever)
-        sim_elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
+        # Sikrer helt friske data til hver simulering
+        elever = [copy.deepcopy(e) for e in oprindelige_elever]
+        for e in elever: e["Tildelt"] = []
+        random.shuffle(elever)
+        elever.sort(key=lambda x: any(s in "".join(x["Ønsker"]).lower() for s in ["ty","fr","sp"]), reverse=True)
 
-        for e in sim_elever:
-            optagede_baand = set()
+        for e in elever:
+            optagede_baand = {}
             for ønske in e["Ønsker"]:
                 placeret = False
                 relevante_hold = [h for h in hold_pool if h["fag"] == ønske]
@@ -115,13 +115,14 @@ if uploaded_file:
                         if any(other["baand"] == h["baand"] and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
                             bånd_konflikt = True
                     
-                    # SIKKERHED: Tjek om elev allerede er på holdet (e ikke i h["elever"])
-                    if h["baand"] not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"] and e not in h["elever"]:
-                        h["elever"].append(e)
-                        optagede_baand.add(h["baand"])
-                        e["Tildelt"].append(ønske)
-                        placeret = True
-                        break
+                    if h["baand"] not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
+                        # EKSTRA TJEK: Er elev allerede tilføjet (ID tjek)?
+                        if not any(el["Id"] == e["Id"] for el in h["elever"]):
+                            h["elever"].append(e)
+                            optagede_baand[h["baand"]] = h
+                            e["Tildelt"].append(ønske)
+                            placeret = True
+                            break
                 
                 if not placeret:
                     for h in relevante_hold:
@@ -131,18 +132,18 @@ if uploaded_file:
                                 if any(other["baand"] == nyt_b and other["base"] == h["base"] and other["navn"] != h["navn"] for other in hold_pool):
                                     bånd_konflikt = True
                             
-                            # SIKKERHED: Samme tjek ved flytning af bånd
-                            if nyt_b not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"] and e not in h["elever"]:
-                                h["baand"] = nyt_b
-                                h["elever"].append(e)
-                                optagede_baand.add(nyt_b)
-                                e["Tildelt"].append(ønske)
-                                placeret = True
-                                break
+                            if nyt_b not in optagede_baand and not bånd_konflikt and len(h["elever"]) < h["max"]:
+                                if not any(el["Id"] == e["Id"] for el in h["elever"]):
+                                    h["baand"] = nyt_b
+                                    h["elever"].append(e)
+                                    optagede_baand[nyt_b] = h
+                                    e["Tildelt"].append(ønske)
+                                    placeret = True
+                                    break
                         if placeret: break
         
-        mangler = sum(1 for e in sim_elever if len(e["Tildelt"]) < len(e["Ønsker"]))
-        return mangler, hold_pool, sim_elever
+        mangler = sum(1 for e in elever if len(e["Tildelt"]) < len(e["Ønsker"]))
+        return mangler, hold_pool, elever
 
     best_mangler = 999
     best_res = None
@@ -156,21 +157,26 @@ if uploaded_file:
 
     final_hold, final_elever = best_res
 
-    # KLASSE-OPTIMERING
+    # --- KLASSE-OPTIMERING MED DUBLET-STOP ---
     for fag_navn in fag_behov.keys():
         fagets_hold = [h for h in final_hold if h["fag"] == fag_navn and not h["is_sprog_fya"]]
         if len(fagets_hold) > 1:
-            for _ in range(200):
+            for _ in range(300):
                 h1, h2 = random.sample(fagets_hold, 2)
-                if h1["baand"] == h2["baand"]:
-                    for i, e1 in enumerate(h1["elever"]):
-                        for j, e2 in enumerate(h2["elever"]):
-                            c1 = (sum(1 for x in h1["elever"] if x["Klasse"] == e1["Klasse"]) + 
-                                  sum(1 for x in h2["elever"] if x["Klasse"] == e2["Klasse"]))
-                            c2 = (sum(1 for x in h1["elever"] if x["Klasse"] == e2["Klasse"]) + 
-                                  sum(1 for x in h2["elever"] if x["Klasse"] == e1["Klasse"]))
-                            if c2 > c1:
-                                h1["elever"][i], h2["elever"][j] = e2, e1
+                if h1["baand"] == h2["baand"] and h1["elever"] and h2["elever"]:
+                    i = random.randrange(len(h1["elever"]))
+                    j = random.randrange(len(h2["elever"]))
+                    e1, e2 = h1["elever"][i], h2["elever"][j]
+                    
+                    c1 = (sum(1 for x in h1["elever"] if x["Klasse"] == e1["Klasse"]) + 
+                          sum(1 for x in h2["elever"] if x["Klasse"] == e2["Klasse"]))
+                    c2 = (sum(1 for x in h1["elever"] if x["Klasse"] == e2["Klasse"]) + 
+                          sum(1 for x in h2["elever"] if x["Klasse"] == e1["Klasse"]))
+                    
+                    if c2 > c1:
+                        # Vigtigt: Byt kun hvis det ikke skaber dubletter
+                        if not any(x["Id"] == e2["Id"] for x in h1["elever"]) and not any(x["Id"] == e1["Id"] for x in h2["elever"]):
+                            h1["elever"][i], h2["elever"][j] = e2, e1
 
     if best_mangler == 0:
         st.success("✅ Succes! Alle ønsker er opfyldt.")
@@ -181,8 +187,18 @@ if uploaded_file:
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         oversigt = []
         for h in final_hold:
+            # Endelig rensning af listerne for ID-dubletter
+            seen_ids = set()
+            clean_list = []
+            for e in h["elever"]:
+                if e["Id"] not in seen_ids:
+                    clean_list.append(e)
+                    seen_ids.add(e["Id"])
+            h["elever"] = clean_list
+
             if h["elever"]:
                 oversigt.append({"Hold": h["navn"], "Bånd": h["baand"], "Antal elever": len(h["elever"])})
+        
         pd.DataFrame(oversigt).sort_values(["Bånd", "Hold"]).to_excel(writer, sheet_name='Oversigt_Hold', index=False)
         
         fejl = [{"Elev": f"{e['Navn']} ({e['Id']})", "Mangler": ", ".join(set(e['Ønsker'])-set(e['Tildelt']))} for e in final_elever if len(e['Tildelt']) < len(e['Ønsker'])]
