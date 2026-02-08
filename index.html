@@ -39,11 +39,51 @@
         <input type="text" id="exclusiveFag" placeholder="f.eks. ia, id">
     </div>
 
+<section>
+  <p>
+    <strong>Kolonner:</strong> Filen <strong>SKAL</strong> indeholde kolonnerne <strong>Id</strong>, <strong>Navn</strong>, <strong>Vf1</strong>, <strong>Vf2</strong>, <strong>Vf3</strong> og <strong>Fr.sprog</strong>.
+  </p>
+  
+  <p><strong>Eksempel på dataformat i Excel:</strong></p>
+  <table border="1" style="border-collapse: collapse; width: 100%; text-align: left;">
+    <thead>
+      <tr style="background-color: #f2f2f2;">
+        <th>Id</th>
+        <th>Navn</th>
+        <th>Vf1</th>
+        <th>Vf2</th>
+        <th>Vf3</th>
+        <th>Fr.sprog</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>2p 23</td>
+        <td>Jensen, Mette</td>
+        <td>&lt;enA&gt;</td>
+        <td>&lt;tyFort.A&gt;</td>
+        <td>&lt;inC&gt;</td>
+        <td></td>
+      </tr>
+      <tr>
+        <td>2q 08</td>
+        <td>Petersen, Jonas</td>
+        <td>&lt;iaB&gt;</td>
+        <td>&lt;tyFort.B&gt;</td>
+        <td></td>
+        <td>24spA2</td>
+      </tr>
+    </tbody>
+  </table>
+  
+  <p>
+    <em>Bemærk: Valgfag står typisk i vinkelparenteser &lt;&gt;, mens fremmedsprog ofte står som ren tekst. Tomme celler er helt okay.</em>
+  </p>
+</section>
     <div class="slider-box">
         <label for="simRange">Antal simuleringer: <b id="simVal">50000</b></label><br>
         <input type="range" id="simRange" min="10000" max="10000000" step="10000" value="50000" oninput="document.getElementById('simVal').innerText = this.value" style="width: 100%;">
     </div>
-
     <input type="file" id="excelFile" />
     <button onclick="process()">Kør Optimering</button>
 <button id="downloadBtn" onclick="downloadExcel()" style="display:none; background:#27ae60; color:white;">Download Excel</button>
