@@ -41,7 +41,8 @@
 
 <section>
   <p>
-    <strong>Kolonner:</strong> Filen <strong>SKAL</strong> indeholde kolonnerne <strong>Id</strong>, <strong>Navn</strong>, <strong>Vf1</strong>, <strong>Vf2</strong>, <strong>Vf3</strong> og <strong>Fr.sprog</strong>.
+    <strong>Kolonner:</strong> Filen <strong>SKAL</strong> indeholde kolonnerne <strong>Id</strong>, <strong>Navn</strong>, <strong>Vf1</strong>, <strong>Vf2</strong>, <strong>Vf3</strong> og <strong>Fr.sprog</strong>.<br>
+      <strong>Fagkoder:</strong> For valgfag skal det sidste bogstav i fagnavnet være enten A, B eller C, fx. idB, maA og iaC. Det er den måde programmet identificerer hvilket bånd faget må placeres i. Det gælder ikke sprogfag.<br>
   </p>
   
   <p><strong>Eksempel på dataformat i Excel:</strong></p>
@@ -81,6 +82,7 @@
   </p>
 </section>
     <div class="slider-box">
+        <p>Jo flere simuleringer, jo større chance for at ramme en god fordeling. <strong>100.000 simuleringer tager ca. et minut at køre.</strong> </p>
         <label for="simRange">Antal simuleringer: <b id="simVal">50000</b></label><br>
         <input type="range" id="simRange" min="10000" max="10000000" step="10000" value="50000" oninput="document.getElementById('simVal').innerText = this.value" style="width: 100%;">
     </div>
