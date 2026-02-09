@@ -214,7 +214,7 @@ async function process() {
 
             if (fagOccupiedInBands[h.fag]) {
                 pb = pb.filter(b => !fagOccupiedInBands[h.fag].has(b));
-                pb = pb.filter(b => b !== 1);
+                //pb = pb.filter(b => b !== 1);
             }
 
             let b = pb.length > 0 ? pb[Math.floor(Math.random() * pb.length)] : (isC ? Math.floor(Math.random()*4)+1 : Math.floor(Math.random()*3)+1);
